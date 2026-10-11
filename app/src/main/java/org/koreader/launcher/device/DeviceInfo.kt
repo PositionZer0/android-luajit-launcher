@@ -167,6 +167,7 @@ object DeviceInfo {
         TOLINO_VISION6,
         TOPJOY_E602,
         XIAOMI_READER,
+        P60Q,
     }
 
     internal val ID: Id
@@ -372,6 +373,10 @@ object DeviceInfo {
             // Moaan W7
             BRAND == "allwinner" && MODEL == "epd103" && DEVICE == "virgo-perf1" && HARDWARE == "sun8iw15p1"
             -> Id.MOAAN_W7
+
+            // P60Q (86G lark, 6" Allwinner sun8iw10p1, Android 4.4)
+            BRAND == "86g" && MODEL == "p60q" && DEVICE == "lark-eink-perf1_86b" && HARDWARE == "sun8iw10p1"
+            -> Id.P60Q
 
             // Mooink Plus 2c
             BRAND == "allwinner" && MODEL == "mooink plus 2c"
@@ -772,6 +777,7 @@ object DeviceInfo {
             Id.ONYX_MAX,
             Id.ONYX_MAX2_PRO,
             Id.ONYX_NOTE,
+            Id.P60Q,          // frontlight is handled by the stock EPD service, no known interface
             Id.SONY_CP1,
             Id.SONY_RP1,
             Id.XIAOMI_READER, // has lights, but they are controllable only via system settings
