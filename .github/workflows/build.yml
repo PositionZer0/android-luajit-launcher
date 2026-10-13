@@ -4,7 +4,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 defaults:
   run:
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        variant: [debug, release]
+        variant: [Debug, Release]
 
     name: ${{ matrix.variant }}
     runs-on: ubuntu-latest
