@@ -777,7 +777,6 @@ object DeviceInfo {
             Id.ONYX_MAX,
             Id.ONYX_MAX2_PRO,
             Id.ONYX_NOTE,
-            Id.P60Q,          // frontlight is handled by the stock EPD service, no known interface
             Id.SONY_CP1,
             Id.SONY_RP1,
             Id.XIAOMI_READER, // has lights, but they are controllable only via system settings

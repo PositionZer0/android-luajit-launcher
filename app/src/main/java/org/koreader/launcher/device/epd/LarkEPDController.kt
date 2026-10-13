@@ -20,24 +20,30 @@ import android.view.View
 import java.lang.reflect.Method
 import org.koreader.launcher.device.EPDInterface
 
-class LarkEPDController : EPDInterface {
+class LarkEPDController internal constructor(
+    private val writeStrategy: (Int, Int) -> Boolean
+) : EPDInterface {
 
+    constructor() : this(::setEinkUpdateStrategy)
+
+    // JNI refresh requests and View callbacks can run on different threads.
+    private val strategyLock = Any()
+    private var paused = false
     private var resetRunnable: Runnable? = null
     private var resetView: View? = null
 
     companion object {
         private const val TAG = "EPD"
 
-        // EPD waveform modes (Allwinner sunxi, same table as SunxiEPDController)
+        // Modes exposed by the P60Q firmware. W7's GLR16=0x40 is unverified here.
         private const val MODE_GC16 = 0x04
         private const val MODE_A2 = 0x10
-        private const val MODE_GLR16 = 0x40
         private const val MODE_GU16 = 0x84 // == GC16_LOCAL(132) on this firmware
 
         // Clean global state: strategy MORE_FRAME_WITHOUT_FLIP + GU16 everywhere.
         // The stock InkReader fullRefresh leaves exactly (1, 132, 132, 132) behind.
         private const val CLEAN_STRATEGY = 1
-        private const val CLEAN_MODE = 132
+        private const val CLEAN_MODE = MODE_GU16
 
         private const val RESET_DELAY_MS = 150L
 
@@ -45,6 +51,7 @@ class LarkEPDController : EPDInterface {
         private var setStrategyFn: Method? = null
 
         @SuppressLint("BlockedPrivateApi")
+        @Synchronized
         private fun initReflection() {
             if (reflectionReady) return
             try {
@@ -73,9 +80,18 @@ class LarkEPDController : EPDInterface {
                 false
             }
         }
+    }
 
-        private fun setCleanState(): Boolean =
-            setEinkUpdateStrategy(CLEAN_STRATEGY, CLEAN_MODE)
+    private fun setCleanState(): Boolean = writeStrategy(CLEAN_STRATEGY, CLEAN_MODE)
+
+    // Call only while holding strategyLock. Invalidate before removing from the
+    // View queue, since a callback may already be waiting to acquire the lock.
+    private fun cancelResetLocked() {
+        val runnable = resetRunnable
+        val view = resetView
+        resetRunnable = null
+        resetView = null
+        if (runnable != null) view?.removeCallbacks(runnable)
     }
 
     override fun getPlatform(): String = "sunxi"
@@ -83,7 +99,8 @@ class LarkEPDController : EPDInterface {
 
     override fun getWaveformFull(): Int = MODE_GC16
     override fun getWaveformPartial(): Int = MODE_GU16
-    override fun getWaveformFullUi(): Int = MODE_GLR16
+    // First UI candidate: use the known GC16 mode; still requires device testing.
+    override fun getWaveformFullUi(): Int = MODE_GC16
     override fun getWaveformPartialUi(): Int = MODE_GU16
     override fun getWaveformFast(): Int = MODE_A2
 
@@ -98,33 +115,54 @@ class LarkEPDController : EPDInterface {
         mode: Int, delay: Long,
         x: Int, y: Int, width: Int, height: Int, epdMode: String?
     ) {
-        val rawMode = when (mode) {
-            getWaveformFull() -> MODE_GC16
-            getWaveformFullUi() -> MODE_GLR16
-            getWaveformFast() -> MODE_A2
+        val rawMode = when {
+            epdMode == "EPD_FULL" || mode == MODE_GC16 -> MODE_GC16 // full / fullUi
+            mode == MODE_A2 -> MODE_A2 // fast
             else -> MODE_GU16
         }
 
-        if (setEinkUpdateStrategy(CLEAN_STRATEGY, rawMode)) {
+        synchronized(strategyLock) {
+            // Do not take global policy ownership back after another app resumes.
+            if (paused) return
+            cancelResetLocked()
+            if (!writeStrategy(CLEAN_STRATEGY, rawMode) || rawMode == CLEAN_MODE) return
+
             // setEinkUpdateStrategy writes a persistent global policy, so reset
-            // to the clean state shortly after the refresh to avoid leaving the
-            // display in a flashing mode.
-            resetRunnable?.let { runnable ->
-                resetView?.removeCallbacks(runnable)
+            // temporary GC16/A2 modes after 150 ms. Callback identity and the
+            // same lock prevent an old reset from overwriting a newer request.
+            val runnable = object : Runnable {
+                override fun run() {
+                    synchronized(strategyLock) {
+                        if (paused || resetRunnable !== this) return
+                        resetRunnable = null
+                        resetView = null
+                        setCleanState()
+                    }
+                }
             }
             resetView = targetView
-            val runnable = Runnable {
+            resetRunnable = runnable
+            if (!targetView.postDelayed(runnable, RESET_DELAY_MS)) {
+                // A rejected callback must not leave a temporary global mode set.
+                cancelResetLocked()
                 setCleanState()
             }
-            resetRunnable = runnable
-            targetView.postDelayed(runnable, RESET_DELAY_MS)
         }
     }
 
     override fun resume() {
         // Wipe the dirty state left behind by sleep/wake or other apps.
-        setCleanState()
+        synchronized(strategyLock) {
+            cancelResetLocked()
+            paused = false
+            setCleanState()
+        }
     }
 
-    override fun pause() {}
+    override fun pause() {
+        synchronized(strategyLock) {
+            paused = true
+            cancelResetLocked()
+        }
+    }
 }

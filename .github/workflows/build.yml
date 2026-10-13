@@ -25,7 +25,7 @@ jobs:
     name: ${{ matrix.variant }}
     runs-on: ubuntu-latest
     container:
-      image: koreader/koandroid:0.9.1-22.04
+      image: koreader/koandroid:5.0.0-22.04
 
     steps:
 
@@ -47,9 +47,17 @@ jobs:
         run: |
           # Ensure the build fail if gradle tries to install/update an SDK package.
           echo 'android.builder.sdkDownload=false' >>gradle.properties
-          ./gradlew app:assembleArmRocks${{ matrix.variant }}
+          ./gradlew app:testArmRocks${{ matrix.variant }}UnitTest app:assembleArmRocks${{ matrix.variant }}
 
       # }}}
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-${{ matrix.variant }}
+          path: app/build/test-results/testArmRocks*UnitTest/*.xml
+          if-no-files-found: ignore
 
   # }}}
 
